@@ -9,6 +9,6 @@ futures-util = "0.3.33"
 http = "1.5.0"
 reqwest-sse = "0.2.0"
 sysinfo = "0.39.6"
-tokio = {version = "1.53.1", features = ["all"]}
+tokio = {version = "1.53.1", features = ["full"]}
 tokio-stream = "0.1.19"
 tower-http = {version = "0.7.0", features = ["cors"]}

@@ -1,0 +1,6 @@
+[unstable]
+multitarget = true
+
+
+[alias]
+build-all = "build --target x86_64-unknown-linux-gnu --target x86_64-pc-windows-gnu"
