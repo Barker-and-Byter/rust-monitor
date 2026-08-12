@@ -18,7 +18,7 @@ use tower_http::cors::{Any, CorsLayer};
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use bollard::Docker;
 use bollard::query_parameters::ListImagesOptionsBuilder;
-
+use std::env;
 
 //struct for network stats
 #[derive(Debug, Clone)]
@@ -132,20 +132,13 @@ async fn start_network_monitor(tx: mpsc::Sender<Vec<NetworkStats>>){
     }
 }
 
-//Implementing docker he he he ha 
-async fn checkDockerImages(){
-
-async move {
-    let options = ListImagesOptionsBuilder::default()
-    .all(true)
-    .build();
-
-};
-}
 
 
 #[tokio::main]
 async fn main(){
+    let port = env::var("PORT")
+    .unwrap_or_else(|_| "3000".to_string());
+
     let cors = CorsLayer::new()
     .allow_origin(Any)
     .allow_methods([http::Method::GET, http::Method::POST, http::Method::OPTIONS])
@@ -153,8 +146,10 @@ async fn main(){
 
     let app = Router::new().route("/cpu-stream", get(sse_handler)).layer(cors);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    println!("server now listening on http://localhost:3000");
+    let addr = format!("0.0.0.0:{}", port);
+
+    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    println!("server now listening on http://{}", addr);
     axum::serve(listener, app).await.unwrap();
 
 }
