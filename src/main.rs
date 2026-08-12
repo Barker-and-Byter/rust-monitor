@@ -7,6 +7,7 @@ use axum::{
     Router
 };
 use futures_util::stream::{self, Stream};
+use futures_util::future::FutureExt;
 use tokio;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
@@ -15,6 +16,8 @@ use sysinfo::{
     Components, Disks, Networks, Signal::Sys, System};
 use tower_http::cors::{Any, CorsLayer};
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
+use bollard::Docker;
+use bollard::query_parameters::ListImagesOptionsBuilder;
 
 
 //struct for network stats
@@ -129,6 +132,16 @@ async fn start_network_monitor(tx: mpsc::Sender<Vec<NetworkStats>>){
     }
 }
 
+//Implementing docker he he he ha 
+async fn checkDockerImages(){
+
+async move {
+    let options = ListImagesOptionsBuilder::default()
+    .all(true)
+    .build();
+
+};
+}
 
 
 #[tokio::main]
@@ -140,7 +153,7 @@ async fn main(){
 
     let app = Router::new().route("/cpu-stream", get(sse_handler)).layer(cors);
 
-    let listener = tokio::net::TcpListener::bind("localhost:3000").await.unwrap();
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
     println!("server now listening on http://localhost:3000");
     axum::serve(listener, app).await.unwrap();
 
