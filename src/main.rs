@@ -1,24 +1,19 @@
 
-use core::time;
-use std::{thread::{self, current}, time::Duration};
+use std::{time::Duration};
 use axum::{
     response::sse::{Event, Sse},
     routing::get,
     Router
 };
 use futures_util::stream::{self, Stream};
-use futures_util::future::FutureExt;
 use tokio;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 //import sysinfo package (yipee)
 use sysinfo::{
-    Components, Disks, Networks, Signal::Sys, System};
+    Disks, Networks, System};
 use tower_http::cors::{Any, CorsLayer};
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
-use bollard::Docker;
-use bollard::query_parameters::ListImagesOptionsBuilder;
-use std::env;
 
 //struct for network stats
 #[derive(Debug, Clone)]
@@ -41,7 +36,7 @@ fn cpu_stats(sys : &mut System) -> f64{
     sys.refresh_cpu_usage();
     let cpu_usage: f64 = sys.global_cpu_usage() as f64;
     println!("Total CPU Usage: {:.0}%", cpu_usage);
-    (cpu_usage)
+    cpu_usage
 }
 
 
@@ -64,7 +59,7 @@ fn ram_stats(sys: &mut System, gb_conv :u64) -> (f64, f64, f64){
 }
 
 //function for extracting disk metrics
-fn disk_usage(sys : &mut System,gb_conv :u64) -> (f64, f64, f64, f64){
+fn disk_usage(_sys : &mut System,gb_conv :u64) -> (f64, f64, f64, f64){
     let disks = Disks::new_with_refreshed_list();
     let mut total_space: f64 = 0.00;
     let mut available_space: f64 = 0.00;
@@ -81,8 +76,8 @@ fn disk_usage(sys : &mut System,gb_conv :u64) -> (f64, f64, f64, f64){
         );
         total_space += disk.total_space() as f64;
         available_space += disk.available_space() as f64;
-        used_space += (disk.total_space() as f64 - disk.available_space() as f64);
-        disk_percentage_used += (used_space / total_space * 100.00);
+        used_space += disk.total_space() as f64 - disk.available_space() as f64;
+        disk_percentage_used += used_space / total_space * 100.00;
     }
 
     (total_space, available_space, used_space, disk_percentage_used)
@@ -134,22 +129,43 @@ async fn start_network_monitor(tx: mpsc::Sender<Vec<NetworkStats>>){
 
 
 
+
+
 #[tokio::main]
 async fn main(){
-    let port = env::var("PORT")
-    .unwrap_or_else(|_| "3000".to_string());
+    let ports = vec![3002, 3001, 3000];
+    let mut actual_addr = None;
+    let mut listener = None;
+    // let mut port_index =0;
+    // let port = env::var("PORT")
+    // .unwrap_or_else(|_| ports[port_index].to_string());
 
     let cors = CorsLayer::new()
     .allow_origin(Any)
     .allow_methods([http::Method::GET, http::Method::POST, http::Method::OPTIONS])
     .allow_headers([CONTENT_TYPE, AUTHORIZATION]);
 
-    let app = Router::new().route("/cpu-stream", get(sse_handler)).layer(cors);
+    let app = Router::new().route("/data-stream", get(sse_handler)).layer(cors);
 
-    let addr = format!("0.0.0.0:{}", port);
+    for port in ports {
+        let addr = format!("0.0.0.0:{}", port);
 
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    println!("server now listening on http://{}", addr);
+        match tokio::net::TcpListener::bind(&addr).await {
+        Ok(res) => {
+            actual_addr = Some(addr);
+            listener = Some(res);
+        }
+        Err(_e) => {
+            println!("Unsuccesful connection on port {}, \ntrying next port", port);
+
+        }
+    }
+    }
+    let listener = match listener{
+        Some(l) => l,
+        None => panic!("We no connect to any ports!!!!!")
+    };
+    println!("server is now listening on http://{:?}", actual_addr.unwrap());
     axum::serve(listener, app).await.unwrap();
 
 }
@@ -166,11 +182,11 @@ async fn sse_handler () -> Sse<impl Stream<Item = Result<Event, std::convert::In
     let mut sys = System::new_all();
     let stream = stream:: repeat_with(move || {
         println!("=> Cpu information");
-        let cpu_usage: f64 = cpu_stats(&mut sys);
+        let mut cpu_usage: f64 = cpu_stats(&mut sys);
         println!("=> Ram information");
         let (used_memory, free_memory, ram_percentage_used) = ram_stats(&mut sys, gb_conv);
         println!("=> disk information");
-        let (total_space, available_space, used_space, disk_percentage_used) = disk_usage(&mut sys, gb_conv);
+        let (_total_space, available_space, used_space, disk_percentage_used) = disk_usage(&mut sys, gb_conv);
         let disk_stats:Vec<DriveStats> = match drive_rx.try_recv(){
             Ok(dstats) => dstats,
             Err(_) => Vec::new()
