@@ -1,6 +1,4 @@
 //The greatest code of all time (adding docker yipeeeeeeeee)
-use bollard::container::StatsOptions;
-use bollard::Docker;
 use std::{time::Duration};
 use axum::{
     response::sse::{Event, Sse},
@@ -12,10 +10,12 @@ use tokio;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 //import sysinfo package (yipee)
-use sysinfo::{
+pub use sysinfo::{
     Disks, Networks, System};
 use tower_http::cors::{Any, CorsLayer};
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
+mod cpu_stats;
+
 
 //struct for network stats
 #[derive(Debug, Clone)]
@@ -32,16 +32,6 @@ pub struct DriveStats{
 }
 
 
-
-//function for extracting and returning important cpu statistics
-fn cpu_stats(sys : &mut System) -> f64{
-    sys.refresh_cpu_usage();
-    let cpu_usage: f64 = sys.global_cpu_usage() as f64;
-    println!("Total CPU Usage: {:.0}%", cpu_usage);
-    cpu_usage
-}
-
-
 //function to extract ram information from the system
 fn ram_stats(sys: &mut System, gb_conv :u64) -> (f64, f64, f64){
     sys.refresh_memory();
@@ -53,7 +43,7 @@ fn ram_stats(sys: &mut System, gb_conv :u64) -> (f64, f64, f64){
     total_memory,
     used_memory,
     free_memory,
-    percentage_used) ;
+    percentage_used);
 
     (used_memory, free_memory, percentage_used)
 
@@ -185,11 +175,9 @@ async fn sse_handler () -> Sse<impl Stream<Item = Result<Event, std::convert::In
 
     let mut sys = System::new_all();
 
-    Docker::connect_with_local_defaults();
-
     let stream = stream:: repeat_with(move || {
         println!("=> Cpu information");
-        let mut cpu_usage: f64 = cpu_stats(&mut sys);
+        let mut cpu_usage: f64 = cpu_stats::get_cpu_stats(&mut sys);
 
         println!("=> Ram information");
         let (used_memory, free_memory, ram_percentage_used) = ram_stats(&mut sys, gb_conv);
