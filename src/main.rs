@@ -15,6 +15,7 @@ use tower_http::cors::{Any, CorsLayer};
 
 //modules
 mod cpu_stats;
+mod drive_stats;
 mod ram_stats;
 
 //struct for network stats
@@ -29,36 +30,6 @@ pub struct NetworkStats {
 pub struct DriveStats {
     pub written_bytes: f64,
     pub read_bytes: f64,
-}
-
-//function for extracting disk metrics
-fn disk_usage(_sys: &mut System, gb_conv: u64) -> (f64, f64, f64, f64) {
-    let disks = Disks::new_with_refreshed_list();
-    let mut total_space: f64 = 0.00;
-    let mut available_space: f64 = 0.00;
-    let mut used_space: f64 = 0.00;
-    let mut disk_percentage_used: f64 = 0.00;
-
-    for disk in disks.list() {
-        println!(
-            "[{:?}] disk total space: {:.2} GBs, (disk available space: {:.2} GBs, disk used space {:.0} GBs, )",
-            disk.name(),
-            disk.total_space() as f64 / gb_conv as f64,
-            disk.available_space() as f64 / gb_conv as f64,
-            (disk.total_space() as f64 - disk.available_space() as f64) / gb_conv as f64,
-        );
-        total_space += disk.total_space() as f64;
-        available_space += disk.available_space() as f64;
-        used_space += disk.total_space() as f64 - disk.available_space() as f64;
-        disk_percentage_used += used_space / total_space * 100.00;
-    }
-
-    (
-        total_space,
-        available_space,
-        used_space,
-        disk_percentage_used,
-    )
 }
 
 async fn start_drive_monitor(tx: mpsc::Sender<Vec<DriveStats>>) {
@@ -162,10 +133,10 @@ async fn sse_handler() -> Sse<impl Stream<Item = Result<Event, std::convert::Inf
         let cpu_usage: f32 = cpu_stats::get_cpu_stats(&mut sys);
 
         println!("=> Ram information");
-        let (total_memory, used_memory, free_memory, ram_percentage_used) = ram_stats::get_ram_stats(&mut sys, gb_conv);
+        let (_total_memory, used_memory, free_memory, ram_percentage_used) = ram_stats::get_ram_stats(&mut sys, gb_conv);
 
         println!("=> disk information");
-        let (_total_space, available_space, used_space, disk_percentage_used) = disk_usage(&mut sys, gb_conv);
+        let (_total_space, available_space, used_space, disk_percentage_used) = drive_stats::disk_usage(&mut sys, gb_conv);
 
         let disk_stats:Vec<DriveStats> = match drive_rx.try_recv(){
             Ok(dstats) => dstats,

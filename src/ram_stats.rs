@@ -19,7 +19,6 @@ pub fn get_ram_stats(sys: &mut System, gb_conv: u64) -> (f32, f32, f32, f32) {
 
 #[cfg(test)]
 mod tests {
-    use sysinfo::Signal::Sys;
 
     use super::*;
 
@@ -34,10 +33,7 @@ mod tests {
             used_memory <= (total_memory),
             "Used memory cannot be greater than total memory"
         );
-        assert!(
-            used_memory >= 0.0,
-            "used memory cannot be less than 0"
-        );
+        assert!(used_memory >= 0.0, "used memory cannot be less than 0");
         assert!(
             total_memory == used_memory + free_memory,
             "total_memory not equivalent to used memory plus free memory"
