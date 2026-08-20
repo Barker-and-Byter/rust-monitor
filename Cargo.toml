@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 axum = "0.8.9"
-bollard = "0.21.0"
+bollard = {version = "0.21.0", features = ["full"]}
 futures-util = "0.3.33"
 http = "1.5.0"
 reqwest-sse = "0.2.0"

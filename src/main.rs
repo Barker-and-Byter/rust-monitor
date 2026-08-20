@@ -1,5 +1,6 @@
-//The greatest code of all time
-
+//The greatest code of all time (adding docker yipeeeeeeeee)
+use bollard::container::StatsOptions;
+use bollard::Docker;
 use std::{time::Duration};
 use axum::{
     response::sse::{Event, Sse},
@@ -175,34 +176,46 @@ async fn sse_handler () -> Sse<impl Stream<Item = Result<Event, std::convert::In
     //create a channel to receive the information with a buffer of 10 
     let (net_tx, mut net_rx) = mpsc::channel::<Vec<NetworkStats>>(10);
     let (drive_tx, mut drive_rx) = mpsc::channel::<Vec<DriveStats>>(10);
+
     tokio::spawn(start_network_monitor(net_tx));
     tokio::spawn(start_drive_monitor(drive_tx));
+
     let x: u64 = 1024;
     let gb_conv = x.pow(3);
 
     let mut sys = System::new_all();
+
+    Docker::connect_with_local_defaults();
+
     let stream = stream:: repeat_with(move || {
         println!("=> Cpu information");
         let mut cpu_usage: f64 = cpu_stats(&mut sys);
+
         println!("=> Ram information");
         let (used_memory, free_memory, ram_percentage_used) = ram_stats(&mut sys, gb_conv);
+
         println!("=> disk information");
         let (_total_space, available_space, used_space, disk_percentage_used) = disk_usage(&mut sys, gb_conv);
+
         let disk_stats:Vec<DriveStats> = match drive_rx.try_recv(){
             Ok(dstats) => dstats,
             Err(_) => Vec::new()
         };
+
         println!("=> network information");
         let network_stats = match net_rx.try_recv(){
             Ok(stats) => stats,
             Err(_) => Vec::new()
         };
+
         let mut total_transmitted = 0.0;
         let mut total_received = 0.0;
+
         for stats in &network_stats {
             total_transmitted += stats.transmitted;
             total_received += stats.received;
         }
+        
         let mut total_written: f64 = 0.0;
         let mut total_read: f64 = 0.0;
         for dstats in &disk_stats{
@@ -210,6 +223,7 @@ async fn sse_handler () -> Sse<impl Stream<Item = Result<Event, std::convert::In
             total_read += dstats.read_bytes;
 
         }
+
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
