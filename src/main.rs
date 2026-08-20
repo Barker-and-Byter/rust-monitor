@@ -1,57 +1,38 @@
-//The greatest code of all time (adding docker yipeeeeeeeee)
-use std::{time::Duration};
+//dependencies
 use axum::{
+    Router,
     response::sse::{Event, Sse},
     routing::get,
-    Router
 };
 use futures_util::stream::{self, Stream};
+use http::header::{AUTHORIZATION, CONTENT_TYPE};
+use std::time::Duration;
+pub use sysinfo::{Disks, Networks, System};
 use tokio;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
-//import sysinfo package (yipee)
-pub use sysinfo::{
-    Disks, Networks, System};
 use tower_http::cors::{Any, CorsLayer};
-use http::header::{AUTHORIZATION, CONTENT_TYPE};
-mod cpu_stats;
 
+//modules
+mod cpu_stats;
+mod ram_stats;
 
 //struct for network stats
 #[derive(Debug, Clone)]
-pub struct NetworkStats{
+pub struct NetworkStats {
     pub interface: String,
     pub received: f64,
-    pub transmitted: f64
+    pub transmitted: f64,
 }
 
 #[derive(Debug, Clone)]
-pub struct DriveStats{
+pub struct DriveStats {
     pub written_bytes: f64,
     pub read_bytes: f64,
 }
 
-
-//function to extract ram information from the system
-fn ram_stats(sys: &mut System, gb_conv :u64) -> (f64, f64, f64){
-    sys.refresh_memory();
-    let total_memory = sys.total_memory() as f64 / gb_conv as f64 ;
-    let used_memory: f64 = sys.used_memory() as f64 / gb_conv as f64;
-    let free_memory = sys.free_memory() as f64/ gb_conv as f64;
-    let percentage_used = (used_memory / total_memory) * 100.0;
-    println!("total memory: {:.2} GBs (used memory: {:.2} GBs, free memory: {:.2} GBs, percentage_used {:.2}%)", 
-    total_memory,
-    used_memory,
-    free_memory,
-    percentage_used);
-
-    (used_memory, free_memory, percentage_used)
-
-
-}
-
 //function for extracting disk metrics
-fn disk_usage(_sys : &mut System,gb_conv :u64) -> (f64, f64, f64, f64){
+fn disk_usage(_sys: &mut System, gb_conv: u64) -> (f64, f64, f64, f64) {
     let disks = Disks::new_with_refreshed_list();
     let mut total_space: f64 = 0.00;
     let mut available_space: f64 = 0.00;
@@ -59,12 +40,12 @@ fn disk_usage(_sys : &mut System,gb_conv :u64) -> (f64, f64, f64, f64){
     let mut disk_percentage_used: f64 = 0.00;
 
     for disk in disks.list() {
-        println!("[{:?}] disk total space: {:.2} GBs, (disk available space: {:.2} GBs, disk used space {:.0} GBs, )",
-        disk.name(),
-        disk.total_space() as f64 / gb_conv as f64,
-        disk.available_space() as f64 / gb_conv as f64,
-        (disk.total_space() as f64 - disk.available_space() as f64) / gb_conv as f64,
-
+        println!(
+            "[{:?}] disk total space: {:.2} GBs, (disk available space: {:.2} GBs, disk used space {:.0} GBs, )",
+            disk.name(),
+            disk.total_space() as f64 / gb_conv as f64,
+            disk.available_space() as f64 / gb_conv as f64,
+            (disk.total_space() as f64 - disk.available_space() as f64) / gb_conv as f64,
         );
         total_space += disk.total_space() as f64;
         available_space += disk.available_space() as f64;
@@ -72,59 +53,54 @@ fn disk_usage(_sys : &mut System,gb_conv :u64) -> (f64, f64, f64, f64){
         disk_percentage_used += used_space / total_space * 100.00;
     }
 
-    (total_space, available_space, used_space, disk_percentage_used)
-
+    (
+        total_space,
+        available_space,
+        used_space,
+        disk_percentage_used,
+    )
 }
 
-async fn start_drive_monitor(tx: mpsc::Sender<Vec<DriveStats>>){
+async fn start_drive_monitor(tx: mpsc::Sender<Vec<DriveStats>>) {
     let mut disks = Disks::new_with_refreshed_list();
-    loop{
+    loop {
         std::thread::sleep(Duration::from_secs(1));
         disks.refresh(true);
         let mut disk_stats: Vec<_> = Vec::new();
-        for disk in &disks{
+        for disk in &disks {
             println!("{disk:?}");
             disk_stats.push(DriveStats {
                 written_bytes: disk.usage().written_bytes as f64,
-                read_bytes: disk.usage().read_bytes as f64
+                read_bytes: disk.usage().read_bytes as f64,
             });
         }
-        if tx.send(disk_stats).await.is_err(){
+        if tx.send(disk_stats).await.is_err() {
             break;
         }
-
-
     }
 }
 
-
-async fn start_network_monitor(tx: mpsc::Sender<Vec<NetworkStats>>){
+async fn start_network_monitor(tx: mpsc::Sender<Vec<NetworkStats>>) {
     let mut networks = Networks::new_with_refreshed_list();
-        loop {
+    loop {
         std::thread::sleep(Duration::from_secs(1));
         networks.refresh(true);
         let mut current_stats = Vec::new();
-        for (interface_name, data) in &networks{
+        for (interface_name, data) in &networks {
             current_stats.push(NetworkStats {
                 interface: interface_name.clone(),
                 received: data.received() as f64,
-                transmitted: data.transmitted() as f64
-
+                transmitted: data.transmitted() as f64,
             });
         }
-        if tx.send(current_stats).await.is_err(){
+        if tx.send(current_stats).await.is_err() {
             break;
         }
-
     }
 }
 
-
-
-
-
 #[tokio::main]
-async fn main(){
+async fn main() {
     let ports = vec![3002, 3001, 3000];
     let mut actual_addr = None;
     let mut listener = None;
@@ -133,37 +109,43 @@ async fn main(){
     // .unwrap_or_else(|_| ports[port_index].to_string());
 
     let cors = CorsLayer::new()
-    .allow_origin(Any)
-    .allow_methods([http::Method::GET, http::Method::POST, http::Method::OPTIONS])
-    .allow_headers([CONTENT_TYPE, AUTHORIZATION]);
+        .allow_origin(Any)
+        .allow_methods([http::Method::GET, http::Method::POST, http::Method::OPTIONS])
+        .allow_headers([CONTENT_TYPE, AUTHORIZATION]);
 
-    let app = Router::new().route("/data-stream", get(sse_handler)).layer(cors);
+    let app = Router::new()
+        .route("/data-stream", get(sse_handler))
+        .layer(cors);
 
     for port in ports {
         let addr = format!("0.0.0.0:{}", port);
 
         match tokio::net::TcpListener::bind(&addr).await {
-        Ok(res) => {
-            actual_addr = Some(addr);
-            listener = Some(res);
-        }
-        Err(_e) => {
-            println!("Unsuccesful connection on port {}, \ntrying next port", port);
-
+            Ok(res) => {
+                actual_addr = Some(addr);
+                listener = Some(res);
+            }
+            Err(_e) => {
+                println!(
+                    "Unsuccesful connection on port {}, \ntrying next port",
+                    port
+                );
+            }
         }
     }
-    }
-    let listener = match listener{
+    let listener = match listener {
         Some(l) => l,
-        None => panic!("We no connect to any ports!!!!!")
+        None => panic!("We no connect to any ports!!!!!"),
     };
-    println!("server is now listening on http://{:?}", actual_addr.unwrap());
+    println!(
+        "server is now listening on http://{:?}",
+        actual_addr.unwrap()
+    );
     axum::serve(listener, app).await.unwrap();
-
 }
 
-async fn sse_handler () -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>>{
-    //create a channel to receive the information with a buffer of 10 
+async fn sse_handler() -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
+    //create a channel to receive the information with a buffer of 10
     let (net_tx, mut net_rx) = mpsc::channel::<Vec<NetworkStats>>(10);
     let (drive_tx, mut drive_rx) = mpsc::channel::<Vec<DriveStats>>(10);
 
@@ -177,10 +159,10 @@ async fn sse_handler () -> Sse<impl Stream<Item = Result<Event, std::convert::In
 
     let stream = stream:: repeat_with(move || {
         println!("=> Cpu information");
-        let mut cpu_usage: f64 = cpu_stats::get_cpu_stats(&mut sys);
+        let cpu_usage: f32 = cpu_stats::get_cpu_stats(&mut sys);
 
         println!("=> Ram information");
-        let (used_memory, free_memory, ram_percentage_used) = ram_stats(&mut sys, gb_conv);
+        let (total_memory, used_memory, free_memory, ram_percentage_used) = ram_stats::get_ram_stats(&mut sys, gb_conv);
 
         println!("=> disk information");
         let (_total_space, available_space, used_space, disk_percentage_used) = disk_usage(&mut sys, gb_conv);
@@ -203,7 +185,7 @@ async fn sse_handler () -> Sse<impl Stream<Item = Result<Event, std::convert::In
             total_transmitted += stats.transmitted;
             total_received += stats.received;
         }
-        
+
         let mut total_written: f64 = 0.0;
         let mut total_read: f64 = 0.0;
         for dstats in &disk_stats{
@@ -239,7 +221,6 @@ async fn sse_handler () -> Sse<impl Stream<Item = Result<Event, std::convert::In
     .map(Ok);
 
     Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new()
-        .interval(std::time::Duration::from_secs(15))
+        axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(15)),
     )
 }
