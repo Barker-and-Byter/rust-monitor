@@ -96,10 +96,11 @@ async fn main() {
                 listener = Some(res);
                 break;
             }
-            Err(_e) => {
+            Err(e) => {
                 println!(
-                    "Unsuccesful connection on port {}, \ntrying next port",
-                    port
+                    "Unsuccesful connection on port {} the error was {}, \ntrying next port",
+                    port,
+                    e
                 );
             }
         }
