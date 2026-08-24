@@ -31,10 +31,6 @@ pub fn disk_usage(_sys: &mut System, gb_conv: u64) -> (f32, f32, f32, f32) {
     )
 }
 
-
-
-
-
 #[cfg(test)]
 mod tests {
 
