@@ -1,8 +1,6 @@
 //dependencies
 use axum::{
-    Router,
-    response::sse::{Event, Sse},
-    routing::get,
+    Router, response::sse::{Event, Sse}, routing::{any, get},
 };
 use futures_util::stream::{self, Stream};
 use http::{HeaderValue, header::{AUTHORIZATION, CONTENT_TYPE}};
@@ -79,8 +77,9 @@ async fn main() {
     // let port = env::var("PORT")
     // .unwrap_or_else(|_| ports[port_index].to_string());
 
+
     let cors = CorsLayer::new()
-        .allow_origin("http://localhost:5173".parse::<HeaderValue>().unwrap())
+        .allow_origin(Any)
         .allow_methods([http::Method::GET, http::Method::POST, http::Method::OPTIONS])
         .allow_headers([CONTENT_TYPE, AUTHORIZATION]);
 
