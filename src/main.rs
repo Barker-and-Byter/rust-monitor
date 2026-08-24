@@ -5,7 +5,7 @@ use axum::{
     routing::get,
 };
 use futures_util::stream::{self, Stream};
-use http::header::{AUTHORIZATION, CONTENT_TYPE};
+use http::{HeaderValue, header::{AUTHORIZATION, CONTENT_TYPE}};
 use std::time::Duration;
 pub use sysinfo::{Disks, Networks, System};
 use tokio;
@@ -80,7 +80,7 @@ async fn main() {
     // .unwrap_or_else(|_| ports[port_index].to_string());
 
     let cors = CorsLayer::new()
-        .allow_origin(Any)
+        .allow_origin("http://localhost:5173".parse::<HeaderValue>().unwrap())
         .allow_methods([http::Method::GET, http::Method::POST, http::Method::OPTIONS])
         .allow_headers([CONTENT_TYPE, AUTHORIZATION]);
 
