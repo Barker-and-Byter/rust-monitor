@@ -70,7 +70,7 @@ async fn start_network_monitor(tx: mpsc::Sender<Vec<NetworkStats>>) {
 
 #[tokio::main]
 async fn main() {
-    let ports = vec![3000, 3001, 3002];
+    let ports = vec![80, 3001, 3002];
     let mut actual_addr = None;
     let mut listener = None;
     // let mut port_index =0;
