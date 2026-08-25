@@ -117,9 +117,9 @@ async fn main() {
 }
 
 async fn sse_handler() -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
-    //create a channel to receive the information with a buffer of 10
-    let (net_tx, mut net_rx) = mpsc::channel::<Vec<NetworkStats>>(10);
-    let (drive_tx, mut drive_rx) = mpsc::channel::<Vec<DriveStats>>(10);
+    //create a channel to receive the information with a buffer of 5
+    let (net_tx, mut net_rx) = mpsc::channel::<Vec<NetworkStats>>(5);
+    let (drive_tx, mut drive_rx) = mpsc::channel::<Vec<DriveStats>>(5);
 
     tokio::spawn(start_network_monitor(net_tx));
     tokio::spawn(start_drive_monitor(drive_tx));
