@@ -4,10 +4,11 @@ use axum::{
     response::sse::{Event, Sse},
     routing::{any, get},
 };
+use docker_wrapper::command::compose::start;
 pub use docker_wrapper::{DockerCommand, PsCommand, StatsCommand};
 use futures_util::stream::{self, Stream};
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
-use std::time::Duration;
+use std::{thread::sleep, time::Duration};
 pub use sysinfo::{Disks, Networks, System};
 use tokio;
 use tokio::sync::mpsc;
@@ -43,40 +44,46 @@ pub struct DockerStats {
     pub dock_block_io: String,
 }
 
-async fn get_docker_stats() -> Result<(), Box<dyn std::error::Error>> {
-    let containers = PsCommand::new()
-        .execute()
-        .await?;
-
-    println!("Running containers: {:?}", containers);
-
-    let stats = StatsCommand::new()
-        .no_stream()
-        .format("json")
-        .run()
-        .await?;
-
-    if stats.success() {
-        for stat in &stats.parsed_stats {
-            println!(
-                "Container name: {:?} CPU_usage percentage: {:?} Memory Usage {:?} Network I/O {:?} Block I/O {:?} ",
-                stat.name,
-                stat.cpu_percentage()
-                    .unwrap(),
-                stat.memory_percentage()
-                    .unwrap(),
-                stat.network_io,
-                stat.block_io
-            )
+async fn start_docker_monitor(tx: mpsc::Sender<Vec<DockerStats>>) {
+    loop {
+        let mut docker_stats = Vec::new();
+        let stats_result = StatsCommand::new().no_stream().format("json").run().await;
+        match stats_result {
+            Ok(stats) => {
+                if stats.success() {
+                    for stat in &stats.parsed_stats {
+                        println!(
+                            "Container name: {:?} CPU_usage percentage: {:?} Memory Usage {:?} Network I/O {:?} Block I/O {:?} ",
+                            stat.name,
+                            stat.cpu_percentage().unwrap_or(0.0),
+                            stat.memory_percentage().unwrap_or(0.0),
+                            stat.network_io,
+                            stat.block_io
+                        );
+                        docker_stats.push(DockerStats {
+                            name: stat.name.clone(),
+                            dock_cpu_perc: stat.cpu_percentage().unwrap_or(0.0),
+                            dock_ram_perc: stat.memory_percentage().unwrap_or(0.0),
+                            dock_net_io: stat.network_io.clone(),
+                            dock_block_io: stat.block_io.clone(),
+                        });
+                    }
+                    if tx.send(docker_stats).await.is_err() {
+                        break;
+                    }
+                } else {
+                    eprintln!(
+                        "Unnsucessful command for docker stats Error : {:?}",
+                        stats.output
+                    );
+                }
+            }
+            Err(err) => {
+                eprintln!("Error collecting stats! error is {:?}", err);
+            }
         }
-    } else {
-        eprintln!(
-            "Unnsucessful command for docker stats Error : {:?}",
-            stats.output
-        );
+        sleep(Duration::from_secs(1));
     }
-
-    Ok(())
 }
 
 async fn start_drive_monitor(tx: mpsc::Sender<Vec<DriveStats>>) {
@@ -88,19 +95,11 @@ async fn start_drive_monitor(tx: mpsc::Sender<Vec<DriveStats>>) {
         for disk in &disks {
             println!("{disk:?}");
             disk_stats.push(DriveStats {
-                written_bytes: disk
-                    .usage()
-                    .written_bytes as f64,
-                read_bytes: disk
-                    .usage()
-                    .read_bytes as f64,
+                written_bytes: disk.usage().written_bytes as f64,
+                read_bytes: disk.usage().read_bytes as f64,
             });
         }
-        if tx
-            .send(disk_stats)
-            .await
-            .is_err()
-        {
+        if tx.send(disk_stats).await.is_err() {
             break;
         }
     }
@@ -119,11 +118,7 @@ async fn start_network_monitor(tx: mpsc::Sender<Vec<NetworkStats>>) {
                 transmitted: data.transmitted() as f64,
             });
         }
-        if tx
-            .send(current_stats)
-            .await
-            .is_err()
-        {
+        if tx.send(current_stats).await.is_err() {
             break;
         }
     }
@@ -172,24 +167,21 @@ async fn main() {
         "server is now listening on http://{:?}",
         actual_addr.unwrap()
     );
-    axum::serve(listener, app)
-        .await
-        .unwrap();
+    axum::serve(listener, app).await.unwrap();
 }
 
 async fn sse_handler() -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
-    get_docker_stats().await;
-
     //create a channel to receive the information with a buffer of 5
+    let (docker_tx, mut docker_rx) = mpsc::channel::<Vec<DockerStats>>(5);
     let (net_tx, mut net_rx) = mpsc::channel::<Vec<NetworkStats>>(5);
     let (drive_tx, mut drive_rx) = mpsc::channel::<Vec<DriveStats>>(5);
 
     tokio::spawn(start_network_monitor(net_tx));
     tokio::spawn(start_drive_monitor(drive_tx));
+    tokio::spawn(start_docker_monitor(docker_tx));
 
     let x: u64 = 1024;
     let gb_conv = x.pow(3);
-
     let mut sys = System::new_all();
 
     let stream = stream:: repeat_with(move || {
@@ -229,14 +221,32 @@ async fn sse_handler() -> Sse<impl Stream<Item = Result<Event, std::convert::Inf
 
         }
 
+        let docker_stats = match docker_rx.try_recv(){
+            Ok(doc_stats) => doc_stats,
+            Err(_) => Vec::new()
+        };
+
+        let containers_json_elements: Vec<String> = docker_stats.iter().map(|doc_stat| {
+            format!(
+                r#"{{"name" : {:?}, "dock_cpu_perc":{:.2}, "dock_ram_perc":{:.2}, "dock_net_io": {:.2}, "dock_block_io": {:.2}}}"#,
+                doc_stat.name,
+                doc_stat.dock_cpu_perc,
+                doc_stat.dock_ram_perc,
+                doc_stat.dock_net_io,
+                doc_stat.dock_block_io
+            )
+        }).collect();
+
+        let containers_json_array = containers_json_elements.join(",");
+
         let timestamp = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
         let json_payload = format!(
-            r#"{{"timestamp":{},"cpuUsage":{:.0},"ramUsage":{:.0},"ramUsed":{:.2},"ramFree":{:.2},"driveUsage":{:.2},"driveUsed":{:.2},"driveFree":{:.2},"uploadSpeed":{:.2},"downSpeed":{:.2},"written":{:.2},"read":{:.2}}}"#,
+            r#"{{"timestamp":{},"cpuUsage":{:.0},"ramUsage":{:.0},"ramUsed":{:.2},"ramFree":{:.2},"driveUsage":{:.2},"driveUsed":{:.2},"driveFree":{:.2},"uploadSpeed":{:.2},"downSpeed":{:.2},"written":{:.2},"read":{:.2},"containers":[{}]}}"#,
             timestamp,
-            cpu_usage,
+            cpu_usage.round(),
             ram_percentage_used,
             used_memory,
             free_memory,
@@ -246,7 +256,8 @@ async fn sse_handler() -> Sse<impl Stream<Item = Result<Event, std::convert::Inf
             total_transmitted / 1024 as f64,
             total_received / 1024 as f64,
             total_written / 1024 as f64,
-            total_read / 1024 as f64
+            total_read / 1024 as f64,
+            containers_json_array
 
         );
 
