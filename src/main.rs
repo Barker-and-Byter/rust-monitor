@@ -4,12 +4,15 @@ use axum::{
 };
 use futures_util::stream::{self, Stream};
 use http::{HeaderValue, header::{AUTHORIZATION, CONTENT_TYPE}};
-use std::time::Duration;
+use std::{default, time::Duration};
 pub use sysinfo::{Disks, Networks, System};
 use tokio;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tower_http::cors::{Any, CorsLayer};
+pub use docker_wrapper::{ PsCommand, DockerCommand, StatsCommand};
+
+
 
 //modules
 mod cpu_stats;
@@ -28,6 +31,29 @@ pub struct NetworkStats {
 pub struct DriveStats {
     pub written_bytes: f64,
     pub read_bytes: f64,
+}
+
+async fn get_docker_stats() -> Result<(), Box<dyn std::error::Error>> {
+    let containers = PsCommand::new()
+        .execute()
+        .await?;
+
+    println!("Running containers: {:?}",
+    containers
+    );
+
+    let stats = StatsCommand::new()
+        .no_stream()
+        .run()
+        .await?;
+
+    println!("Container stats: {:?}",
+        stats
+    );
+
+
+    Ok(())
+
 }
 
 async fn start_drive_monitor(tx: mpsc::Sender<Vec<DriveStats>>) {
@@ -117,6 +143,9 @@ async fn main() {
 }
 
 async fn sse_handler() -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
+
+    get_docker_stats().await;
+
     //create a channel to receive the information with a buffer of 5
     let (net_tx, mut net_rx) = mpsc::channel::<Vec<NetworkStats>>(5);
     let (drive_tx, mut drive_rx) = mpsc::channel::<Vec<DriveStats>>(5);

@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 axum = "0.8.9"
+docker-wrapper = "0.11.2"
 futures-util = "0.3.33"
 http = "1.5.0"
 reqwest-sse = "0.2.0"
