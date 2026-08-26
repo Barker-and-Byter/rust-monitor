@@ -1,19 +1,18 @@
 //dependencies
 use axum::{
-    Router, response::sse::{Event, Sse}, routing::{any, get},
+    Router,
+    response::sse::{Event, Sse},
+    routing::{any, get},
 };
+pub use docker_wrapper::{DockerCommand, PsCommand, StatsCommand};
 use futures_util::stream::{self, Stream};
-use http::{HeaderValue, header::{AUTHORIZATION, CONTENT_TYPE}};
-use std::{default, time::Duration};
+use http::header::{AUTHORIZATION, CONTENT_TYPE};
+use std::time::Duration;
 pub use sysinfo::{Disks, Networks, System};
 use tokio;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tower_http::cors::{Any, CorsLayer};
-pub use docker_wrapper::{ PsCommand, DockerCommand, StatsCommand};
-
-
-
 //modules
 mod cpu_stats;
 mod drive_stats;
@@ -27,10 +26,21 @@ pub struct NetworkStats {
     pub transmitted: f64,
 }
 
+// struct for drive stats
 #[derive(Debug, Clone)]
 pub struct DriveStats {
     pub written_bytes: f64,
     pub read_bytes: f64,
+}
+
+// struct for docker stats
+#[derive(Debug, Clone)]
+pub struct DockerStats {
+    pub name: String,
+    pub dock_cpu_perc: f64,
+    pub dock_ram_perc: f64,
+    pub dock_net_io: String,
+    pub dock_block_io: String,
 }
 
 async fn get_docker_stats() -> Result<(), Box<dyn std::error::Error>> {
@@ -38,22 +48,35 @@ async fn get_docker_stats() -> Result<(), Box<dyn std::error::Error>> {
         .execute()
         .await?;
 
-    println!("Running containers: {:?}",
-    containers
-    );
+    println!("Running containers: {:?}", containers);
 
     let stats = StatsCommand::new()
         .no_stream()
+        .format("json")
         .run()
         .await?;
 
-    println!("Container stats: {:?}",
-        stats
-    );
-
+    if stats.success() {
+        for stat in &stats.parsed_stats {
+            println!(
+                "Container name: {:?} CPU_usage percentage: {:?} Memory Usage {:?} Network I/O {:?} Block I/O {:?} ",
+                stat.name,
+                stat.cpu_percentage()
+                    .unwrap(),
+                stat.memory_percentage()
+                    .unwrap(),
+                stat.network_io,
+                stat.block_io
+            )
+        }
+    } else {
+        eprintln!(
+            "Unnsucessful command for docker stats Error : {:?}",
+            stats.output
+        );
+    }
 
     Ok(())
-
 }
 
 async fn start_drive_monitor(tx: mpsc::Sender<Vec<DriveStats>>) {
@@ -65,11 +88,19 @@ async fn start_drive_monitor(tx: mpsc::Sender<Vec<DriveStats>>) {
         for disk in &disks {
             println!("{disk:?}");
             disk_stats.push(DriveStats {
-                written_bytes: disk.usage().written_bytes as f64,
-                read_bytes: disk.usage().read_bytes as f64,
+                written_bytes: disk
+                    .usage()
+                    .written_bytes as f64,
+                read_bytes: disk
+                    .usage()
+                    .read_bytes as f64,
             });
         }
-        if tx.send(disk_stats).await.is_err() {
+        if tx
+            .send(disk_stats)
+            .await
+            .is_err()
+        {
             break;
         }
     }
@@ -88,7 +119,11 @@ async fn start_network_monitor(tx: mpsc::Sender<Vec<NetworkStats>>) {
                 transmitted: data.transmitted() as f64,
             });
         }
-        if tx.send(current_stats).await.is_err() {
+        if tx
+            .send(current_stats)
+            .await
+            .is_err()
+        {
             break;
         }
     }
@@ -102,7 +137,6 @@ async fn main() {
     // let mut port_index =0;
     // let port = env::var("PORT")
     // .unwrap_or_else(|_| ports[port_index].to_string());
-
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -125,8 +159,7 @@ async fn main() {
             Err(e) => {
                 println!(
                     "Unsuccesful connection on port {} the error was {}, \ntrying next port",
-                    port,
-                    e
+                    port, e
                 );
             }
         }
@@ -139,11 +172,12 @@ async fn main() {
         "server is now listening on http://{:?}",
         actual_addr.unwrap()
     );
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .await
+        .unwrap();
 }
 
 async fn sse_handler() -> Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>> {
-
     get_docker_stats().await;
 
     //create a channel to receive the information with a buffer of 5
