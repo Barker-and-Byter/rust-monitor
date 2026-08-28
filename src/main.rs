@@ -6,7 +6,10 @@ use axum::{
 };
 use docker_wrapper::command::compose::start;
 pub use docker_wrapper::{DockerCommand, PsCommand, StatsCommand};
-use futures_util::stream::{self, Stream};
+use futures_util::{
+    future::err,
+    stream::{self, Stream},
+};
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use std::{thread::sleep, time::Duration};
 pub use sysinfo::{Disks, Networks, System};
@@ -14,6 +17,7 @@ use tokio;
 use tokio::sync::mpsc;
 use tokio_stream::StreamExt;
 use tower_http::cors::{Any, CorsLayer};
+
 //modules
 mod cpu_stats;
 mod drive_stats;
@@ -45,9 +49,10 @@ pub struct DockerStats {
 }
 
 async fn start_docker_monitor(tx: mpsc::Sender<Vec<DockerStats>>) {
+    let stats_command = StatsCommand::new().format("json").no_stream();
     loop {
         let mut docker_stats = Vec::new();
-        let stats_result = StatsCommand::new().no_stream().format("json").run().await;
+        let stats_result = stats_command.run().await;
         match stats_result {
             Ok(stats) => {
                 if stats.success() {
@@ -69,6 +74,7 @@ async fn start_docker_monitor(tx: mpsc::Sender<Vec<DockerStats>>) {
                         });
                     }
                     if tx.send(docker_stats).await.is_err() {
+                        println!("error in sending docker stats to main function");
                         break;
                     }
                 } else {
@@ -183,8 +189,16 @@ async fn sse_handler() -> Sse<impl Stream<Item = Result<Event, std::convert::Inf
     let x: u64 = 1024;
     let gb_conv = x.pow(3);
     let mut sys = System::new_all();
+    let mut last_docker_stats: Vec<DockerStats> = Vec::new();
 
     let stream = stream:: repeat_with(move || {
+        let hostname = System::host_name().unwrap_or_default();
+
+        println!("=>hostname! {}",
+        hostname
+        );
+
+
         println!("=> Cpu information");
         let cpu_usage: f32 = cpu_stats::get_cpu_stats(&mut sys);
 
@@ -221,14 +235,22 @@ async fn sse_handler() -> Sse<impl Stream<Item = Result<Event, std::convert::Inf
 
         }
 
-        let docker_stats = match docker_rx.try_recv(){
-            Ok(doc_stats) => doc_stats,
-            Err(_) => Vec::new()
+       
+
+        let docker_stats = match docker_rx.try_recv() {
+            Ok(doc_stats) => {
+                last_docker_stats = doc_stats
+            }
+            Err(_) => {
+
+            }
         };
+        let docker_stats =&last_docker_stats;
+
 
         let containers_json_elements: Vec<String> = docker_stats.iter().map(|doc_stat| {
             format!(
-                r#"{{"name" : {:?}, "dock_cpu_perc":{:.2}, "dock_ram_perc":{:.2}, "dock_net_io": {:.2}, "dock_block_io": {:.2}}}"#,
+                r#"{{"name" : {:?}, "dock_cpu_perc":{:.2}, "dock_ram_perc":{:.2}, "dock_net_io": {:?}, "dock_block_io": {:?}}}"#,
                 doc_stat.name,
                 doc_stat.dock_cpu_perc,
                 doc_stat.dock_ram_perc,
@@ -244,7 +266,7 @@ async fn sse_handler() -> Sse<impl Stream<Item = Result<Event, std::convert::Inf
             .unwrap_or_default()
             .as_millis() as u64;
         let json_payload = format!(
-            r#"{{"timestamp":{},"cpuUsage":{:.0},"ramUsage":{:.0},"ramUsed":{:.2},"ramFree":{:.2},"driveUsage":{:.2},"driveUsed":{:.2},"driveFree":{:.2},"uploadSpeed":{:.2},"downSpeed":{:.2},"written":{:.2},"read":{:.2},"containers":[{}]}}"#,
+            r#"{{"timestamp":{},"cpuUsage":{:.0},"ramUsage":{:.0},"ramUsed":{:.2},"ramFree":{:.2},"driveUsage":{:.2},"driveUsed":{:.2},"driveFree":{:.2},"uploadSpeed":{:.2},"downSpeed":{:.2},"written":{:.2},"read":{:.2},"hostname":{:?},"containers":[{}]}}"#,
             timestamp,
             cpu_usage.round(),
             ram_percentage_used,
@@ -257,8 +279,8 @@ async fn sse_handler() -> Sse<impl Stream<Item = Result<Event, std::convert::Inf
             total_received / 1024 as f64,
             total_written / 1024 as f64,
             total_read / 1024 as f64,
-            containers_json_array
-
+            hostname,
+            containers_json_array,
         );
 
         Event::default().data(json_payload)
