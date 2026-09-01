@@ -56,6 +56,11 @@ fn clear_console() {
 }
 
 async fn start_docker_monitor(tx: mpsc::Sender<Vec<DockerStats>>) {
+    if std::process::Command::new("docker").arg("--version").output().is_err() {
+        eprintln!("Docker is not installed or not in PATH. Stopping Docker monitor.");
+        return;
+    }
+
     let stats_command = StatsCommand::new().format("json").no_stream();
     loop {
         let mut docker_stats = Vec::new();

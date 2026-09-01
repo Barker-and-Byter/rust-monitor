@@ -15,4 +15,4 @@ tokio-stream = "0.1.19"
 tower-http = {version = "0.7.0", features = ["cors"]}
 
 [target.'cfg(target_os = "linux")']
-runner = "sh -c 'sudo setcap cap_net_bind_service=+ep \"$0\" && \"$0\"'"
+runner = "sh -c 'sudo setcap cap_net_bind_service=+ep \"$1\" && \"$1\"' --"
