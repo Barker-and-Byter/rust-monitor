@@ -10,12 +10,13 @@ use futures_util::{
     future::err,
     stream::{self, Stream},
 };
+use std::io::{self, Write};
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
 use std::{thread::sleep, time::Duration};
 pub use sysinfo::{Disks, Networks, System};
 use tokio;
 use tokio::sync::mpsc;
-use tokio_stream::StreamExt;
+use tokio_stream::{StreamExt, wrappers::IntervalStream};
 use tower_http::cors::{Any, CorsLayer};
 
 //modules
@@ -47,6 +48,12 @@ pub struct DockerStats {
     pub dock_net_io: String,
     pub dock_block_io: String,
 }
+fn clear_console() {
+    print!("\x1B[2J\x1B[1;1H");
+    
+    // Flush stdout to guarantee the terminal updates immediately
+    std::io::stdout().flush().unwrap();
+}
 
 async fn start_docker_monitor(tx: mpsc::Sender<Vec<DockerStats>>) {
     let stats_command = StatsCommand::new().format("json").no_stream();
@@ -73,8 +80,8 @@ async fn start_docker_monitor(tx: mpsc::Sender<Vec<DockerStats>>) {
                             dock_block_io: stat.block_io.clone(),
                         });
                     }
-                    if tx.send(docker_stats).await.is_err() {
-                        println!("error in sending docker stats to main function");
+                    if let Err(e) = tx.send(docker_stats).await {
+                        println!("error in sending docker stats to main function {}", e);
                         break;
                     }
                 } else {
@@ -190,8 +197,11 @@ async fn sse_handler() -> Sse<impl Stream<Item = Result<Event, std::convert::Inf
     let gb_conv = x.pow(3);
     let mut sys = System::new_all();
     let mut last_docker_stats: Vec<DockerStats> = Vec::new();
+    let interval = tokio::time::interval(Duration::from_secs(1));
 
-    let stream = stream:: repeat_with(move || {
+
+    let stream = IntervalStream::new(interval).map(move |_| {
+        // clear_console();
         let hostname = System::host_name().unwrap_or_default();
 
         println!("=>hostname! {}",
@@ -283,10 +293,8 @@ async fn sse_handler() -> Sse<impl Stream<Item = Result<Event, std::convert::Inf
             containers_json_array,
         );
 
-        Event::default().data(json_payload)
-    })
-    .throttle(std::time::Duration::from_millis(1000))
-    .map(Ok);
+        Ok::<Event, std::convert::Infallible>(Event::default().data(json_payload))
+    });
 
     Sse::new(stream).keep_alive(
         axum::response::sse::KeepAlive::new().interval(std::time::Duration::from_secs(15)),
