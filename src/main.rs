@@ -1,30 +1,33 @@
 //dependencies
 use axum::{
     Router,
+    http::StatusCode,
     response::sse::{Event, Sse},
     routing::{any, get, post},
-    http::StatusCode,
-    {Json, response::IntoResponse}
+    {Json, response::IntoResponse},
 };
-use time::SignedDuration;
-use std::{
-    collections::HashSet,
-    sync::{Mutex, OnceLock},
-};
-use rand::RngExt;
-use serde::Deserialize;
 use axum_extra::extract::{CookieJar, cookie::Cookie};
 use docker_wrapper::command::compose::start;
 pub use docker_wrapper::{DockerCommand, PsCommand, StatsCommand};
+use dotenv::dotenv;
 use futures_util::{
     future::err,
     stream::{self, Stream},
 };
-use std::{env, io::{self, Write}};
 use http::header::{AUTHORIZATION, CONTENT_TYPE};
+use rand::RngExt;
+use serde::Deserialize;
+use std::{
+    collections::HashSet,
+    sync::{Mutex, OnceLock},
+};
+use std::{
+    env,
+    io::{self, Write},
+};
 use std::{thread::sleep, time::Duration};
 pub use sysinfo::{Disks, Networks, System};
-use dotenv::dotenv;
+use time::SignedDuration;
 use tokio;
 use tokio::sync::mpsc;
 use tokio_stream::{StreamExt, wrappers::IntervalStream};
@@ -56,7 +59,7 @@ struct AuthRequest {
     secret: String,
 }
 
-//sessions storage for front end server 
+//sessions storage for front end server
 static SESSIONS: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
 
 fn sessions() -> &'static Mutex<HashSet<String>> {
@@ -74,13 +77,17 @@ pub struct DockerStats {
 }
 fn clear_console() {
     print!("\x1B[2J\x1B[1;1H");
-    
+
     // Flush stdout to guarantee the terminal updates immediately
     std::io::stdout().flush().unwrap();
 }
 
 async fn start_docker_monitor(tx: mpsc::Sender<Vec<DockerStats>>) {
-    if std::process::Command::new("docker").arg("--version").output().is_err() {
+    if std::process::Command::new("docker")
+        .arg("--version")
+        .output()
+        .is_err()
+    {
         eprintln!("Docker is not installed or not in PATH. Stopping Docker monitor.");
         return;
     }
@@ -214,8 +221,7 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
-
-async fn authenticate_handler (
+async fn authenticate_handler(
     jar: CookieJar,
     Json(payload): Json<AuthRequest>,
 ) -> impl IntoResponse {
@@ -227,10 +233,10 @@ async fn authenticate_handler (
     }
 
     let session_token: String = rand::rng()
-    .sample_iter(&rand::distr::Alphanumeric)
-    .take(32)
-    .map(char::from)
-    .collect();
+        .sample_iter(&rand::distr::Alphanumeric)
+        .take(32)
+        .map(char::from)
+        .collect();
 
     sessions().lock().unwrap().insert(session_token.clone());
 
@@ -241,27 +247,22 @@ async fn authenticate_handler (
         .secure(false)
         .max_age(SignedDuration::hours(12))
         .build();
-   
 
     (StatusCode::OK, jar.add(cookie)).into_response()
 }
 
-
 async fn sse_handler(
     jar: CookieJar,
 ) -> Result<Sse<impl Stream<Item = Result<Event, std::convert::Infallible>>>, StatusCode> {
-
-
-    let authorised =  jar
-    .get("auth_token")
-    .map(|cookie| cookie.value().to_string())
-    .map(|token| sessions().lock().unwrap().contains(&token))
-    .unwrap_or(false);
+    let authorised = jar
+        .get("auth_token")
+        .map(|cookie| cookie.value().to_string())
+        .map(|token| sessions().lock().unwrap().contains(&token))
+        .unwrap_or(false);
 
     if !authorised {
         return Err(StatusCode::UNAUTHORIZED);
     }
-
 
     //create a channel to receive the information with a buffer of 5
     let (docker_tx, mut docker_rx) = mpsc::channel::<Vec<DockerStats>>(5);
@@ -277,7 +278,6 @@ async fn sse_handler(
     let mut sys = System::new_all();
     let mut last_docker_stats: Vec<DockerStats> = Vec::new();
     let interval = tokio::time::interval(Duration::from_secs(1));
-
 
     let stream = IntervalStream::new(interval).map(move |_| {
         // clear_console();
@@ -323,9 +323,6 @@ async fn sse_handler(
             total_read += dstats.read_bytes;
 
         }
-
-       
-
         let docker_stats = match docker_rx.try_recv() {
             Ok(doc_stats) => {
                 last_docker_stats = doc_stats
