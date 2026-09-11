@@ -244,7 +244,7 @@ async fn authenticate_handler(
         .path("/")
         .http_only(true)
         .same_site(axum_extra::extract::cookie::SameSite::Lax)
-        .secure(false)
+        .secure(true)
         .max_age(SignedDuration::hours(12))
         .build();
 
