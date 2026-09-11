@@ -27,7 +27,7 @@ use std::{
 };
 use std::{thread::sleep, time::Duration};
 pub use sysinfo::{Disks, Networks, System};
-use time::SignedDuration;
+use time::{SignedDuration, unit::Unit::Second};
 use tokio;
 use tokio::sync::mpsc;
 use tokio_stream::{StreamExt, wrappers::IntervalStream};
@@ -183,7 +183,7 @@ async fn main() {
     // .unwrap_or_else(|_| ports[port_index].to_string());
 
     let cors = CorsLayer::new()
-        .allow_origin(AllowOrigin::exact("http://localhost:5173".parse().unwrap()))
+        .allow_origin(AllowOrigin::exact("http://dashiboardi.duckdns.org".parse().unwrap()))
         .allow_methods([http::Method::GET, http::Method::POST, http::Method::OPTIONS])
         .allow_headers([CONTENT_TYPE, AUTHORIZATION])
         .allow_credentials(true);
@@ -244,7 +244,7 @@ async fn authenticate_handler(
         .path("/")
         .http_only(true)
         .same_site(axum_extra::extract::cookie::SameSite::Lax)
-        .secure(false)
+        .secure(true)
         .max_age(SignedDuration::hours(12))
         .build();
 
